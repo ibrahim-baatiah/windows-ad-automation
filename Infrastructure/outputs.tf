@@ -9,7 +9,7 @@ output "virtual_network_id" {
 }
 
 output "windows_private_ip_addresses" {
-  description = "Private IP addresses of the three Windows Spot VMs."
+  description = "Private IP addresses of the three Windows VMs."
   value = {
     for name, nic in azurerm_network_interface.windows :
     name => nic.private_ip_address
