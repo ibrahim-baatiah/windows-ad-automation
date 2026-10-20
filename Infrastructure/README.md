@@ -6,19 +6,19 @@ Ubuntu Linux VM. It also creates the resource group, network, public IP
 addresses, and subnet-level network security group (NSG).
 
 > **Deployment status:** The previous deployment was destroyed. The Azure
-> resource group `rg-spot-vms` and its resources were confirmed removed. Run
+> deployment resource group and its resources were confirmed removed. Run
 > `terraform apply` to create the infrastructure again.
 
 ## What gets created
 
 | Resource | Configuration |
 | --- | --- |
-| Resource group | `rg-spot-vms`, in `polandcentral` by default |
-| Virtual network | `rg-spot-vms-vnet`, address space `10.20.0.0/16` |
-| Subnet | `workload`, address prefix `10.20.1.0/24` |
-| Windows VMs | `win-01`, `win-02`, `win-03`; all regular, non-Spot VMs |
+| Resource group | Configurable name and Azure region |
+| Virtual network | One VNet with a private IPv4 address space |
+| Subnet | One subnet shared by all four VMs |
+| Windows VMs | Three regular, non-Spot VMs |
 | Windows image | Generalized Windows Gen2 managed image, described below |
-| Linux VM | `linux-01`, Ubuntu Server 22.04 LTS Gen2; regular, non-Spot |
+| Linux VM | Ubuntu Server 22.04 LTS Gen2; regular, non-Spot |
 | VM sizes | `Standard_D2s_v5` for Windows and Linux by default |
 | Network interfaces | One per VM, with a dynamic private IPv4 address |
 | Public IPs | One Standard SKU, static IPv4 address per VM |
@@ -30,18 +30,12 @@ is restricted by the subnet NSG.
 
 ## Windows managed image
 
-The Windows VMs use this Azure managed image ID:
-
-```text
-/subscriptions/9248b49a-6e5f-4ce1-b906-cd5b6baf80cf/resourceGroups/test/providers/Microsoft.Compute/images/win-winrm-image
-```
-
-The image was inspected in Azure and reported as a succeeded, generalized,
-Windows, Gen2 image. The image resource is in the separate `test` resource
-group in the same subscription. Keep that image and its resource group in
-place, and ensure the deploying identity can read/use it, for as long as
-Terraform may need to create or replace the Windows VMs. The image must also
-remain available in a region compatible with the VM deployment.
+The Windows VMs use a generalized Windows Gen2 Azure managed image. Its
+resource ID is configured in `main.tf` and is intentionally omitted from this
+README. Keep the source image available, and ensure the deploying identity can
+read and use it, for as long as Terraform may need to create or replace the
+Windows VMs. The image must also be available in a region compatible with the
+VM deployment.
 
 Terraform's `source_image_id` uses the managed image directly. The VM
 configuration does not explicitly enable Trusted Launch for this image.
@@ -107,8 +101,8 @@ unset TF_VAR_admin_password
 Other settings can be supplied in `terraform.tfvars`, for example:
 
 ```hcl
-resource_group_name    = "rg-spot-vms"
-location               = "polandcentral"
+resource_group_name    = "your-resource-group"
+location               = "your-azure-region"
 windows_vm_size        = "Standard_D2s_v5"
 linux_vm_size          = "Standard_D2s_v5"
 windows_admin_username = "azureadmin"
@@ -138,7 +132,7 @@ From this directory, authenticate and choose the intended subscription:
 
 ```sh
 az login
-az account set --subscription "9248b49a-6e5f-4ce1-b906-cd5b6baf80cf"
+az account set --subscription "<subscription-id>"
 az account show --output table
 ```
 
