@@ -1,0 +1,44 @@
+---
+# Requires: ansible-galaxy collection install ansible.windows microsoft.ad
+- name: Install AD DS role on all servers
+  hosts: win
+  gather_facts: false
+  tasks:
+    - name: Install AD-Domain-Services feature
+      ansible.windows.win_feature:
+        name: AD-Domain-Services
+        include_management_tools: true
+        state: present
+
+- name: Create new forest on the first DC
+  hosts: dc_primary
+  gather_facts: false
+  tasks:
+    - name: Create forest and promote to DC
+      microsoft.ad.domain:
+        dns_domain_name: "{{ domain_name }}"
+        domain_netbios_name: "{{ domain_netbios }}"
+        safe_mode_password: "{{ safe_mode_password }}"
+        install_dns: true
+        reboot: true
+
+- name: Promote remaining servers as additional DCs
+  hosts: dc_additional
+  gather_facts: false
+  serial: 1 # promote one at a time
+  tasks:
+    - name: Point DNS to the primary DC
+      ansible.windows.win_dns_client:
+        adapter_names: "*"
+        dns_servers:
+          - "{{ dc_primary_ip }}"
+
+    - name: Promote to domain controller
+      microsoft.ad.domain_controller:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "{{ domain_netbios }}\\{{ ansible_user }}"
+        domain_admin_password: "{{ ansible_password }}"
+        safe_mode_password: "{{ safe_mode_password }}"
+        install_dns: true
+        state: domain_controller
+        reboot: true
