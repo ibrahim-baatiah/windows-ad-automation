@@ -80,10 +80,6 @@ resource "azurerm_windows_virtual_machine" "main" {
     azurerm_network_interface.windows[each.key].id
   ]
 
-  priority        = "Spot"
-  eviction_policy = var.spot_eviction_policy
-  max_bid_price   = var.spot_max_bid_price
-
   source_image_reference {
     publisher = "MicrosoftWindowsServer"
     offer     = "WindowsServer"
@@ -113,10 +109,6 @@ resource "azurerm_linux_virtual_machine" "main" {
 
   disable_password_authentication = false
   admin_password                  = var.admin_password
-  priority                        = "Spot"
-  eviction_policy                 = var.spot_eviction_policy
-  max_bid_price                   = var.spot_max_bid_price
-
   source_image_reference {
     publisher = "Canonical"
     offer     = "0001-com-ubuntu-server-jammy"

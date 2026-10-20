@@ -1,9 +1,9 @@
 # Azure Spot VM infrastructure
 
 This configuration creates a new resource group, one virtual network and subnet,
-three Windows Server 2022 VMs, and one Ubuntu 22.04 LTS VM. All four VMs use Azure
-Spot priority and share the subnet. The VMs have private IP addresses only; no
-public IPs or inbound internet access are created.
+three regular (non-Spot) Windows Server 2022 VMs, and one regular (non-Spot)
+Ubuntu 22.04 LTS VM. All four VMs share the subnet. The VMs have private IP
+addresses only; no public IPs or inbound internet access are created.
 
 ## Requirements
 
@@ -20,8 +20,7 @@ From this directory:
    `admin_password`, or supply it through the `TF_VAR_admin_password`
    environment variable. The password variable is marked sensitive. Do not
    commit real credentials; the local tfvars file is excluded from Git.
-2. Change `location` if needed. Spot capacity, VM size availability, and image
-   availability vary by region.
+2. Change `location` if needed. VM size and image availability vary by region.
 3. Run:
 
    ```sh
@@ -32,13 +31,6 @@ From this directory:
    ```
 
 4. Review the plan, then run `terraform apply` to create the resources.
-
-The default Spot eviction policy is `Deallocate`, which retains the OS disks
-(and their storage charges) after eviction. Set `spot_eviction_policy` to
-`Delete` if the disks should be deleted on eviction. A max bid of `-1` lets
-Azure bid up to the regular pay-as-you-go price; capacity evictions can still
-occur. The selected VM size may need to be changed if Spot capacity is
-unavailable in the chosen region.
 
 Because the VMs have no public IP addresses, connect from a network with access
 to this VNet (for example, through VPN or peering). The same sensitive

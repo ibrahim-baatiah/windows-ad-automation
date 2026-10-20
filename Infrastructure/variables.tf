@@ -7,7 +7,7 @@ variable "resource_group_name" {
 variable "location" {
   description = "Azure region for the resource group and virtual machines."
   type        = string
-  default     = "eastus"
+  default     = "polandcentral"
 }
 
 variable "windows_vm_size" {
@@ -43,28 +43,6 @@ variable "linux_admin_username" {
   description = "SSH administrator username for the Linux VM."
   type        = string
   default     = "azureuser"
-}
-
-variable "spot_eviction_policy" {
-  description = "Whether an evicted Spot VM is deallocated (retaining its disks) or deleted."
-  type        = string
-  default     = "Deallocate"
-
-  validation {
-    condition     = contains(["Deallocate", "Delete"], var.spot_eviction_policy)
-    error_message = "spot_eviction_policy must be Deallocate or Delete."
-  }
-}
-
-variable "spot_max_bid_price" {
-  description = "Maximum hourly Spot price in USD; -1 means up to the pay-as-you-go price."
-  type        = number
-  default     = -1
-
-  validation {
-    condition     = var.spot_max_bid_price == -1 || var.spot_max_bid_price >= 0
-    error_message = "spot_max_bid_price must be -1 or a non-negative number."
-  }
 }
 
 variable "tags" {
