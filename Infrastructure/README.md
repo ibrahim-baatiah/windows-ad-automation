@@ -1,208 +1,124 @@
-# Azure VM infrastructure
+# Azure Windows PKI lab infrastructure
 
-Terraform in this directory provisions four regular (non-Spot) virtual
-machines in Azure: three Windows VMs from a custom managed image and one
-Ubuntu Linux VM. It also creates the resource group, network, public IP
-addresses, and subnet-level network security group (NSG).
+Terraform provisions four raw Windows Server 2022 Datacenter Gen2 Spot VMs.
+It does not install Active Directory, DNS, Certificate Services, or a web
+server role; configure those inside the VMs after deployment.
 
-> **Deployment status:** The previous deployment was destroyed. The Azure
-> deployment resource group and its resources were confirmed removed. Run
-> `terraform apply` to create the infrastructure again.
+| VM | Purpose | Azure region | Network |
+| --- | --- | --- | --- |
+| `DC01` | Domain controller / DNS | Switzerland North (`switzerlandnorth`) | Peered |
+| `CA01` | Standalone offline root CA | Germany West Central (`germanywestcentral`) | Isolated, not peered |
+| `CA02` | Enterprise issuing CA | France Central (`francecentral`) | Peered |
+| `SRV1` | HTTP CDP/AIA web server | North Europe (`northeurope`) | Peered |
 
-## What gets created
+All resources are in the same resource group, whose location defaults to
+Poland Central. Azure VNets are regional, so each VM has a separate VNet and
+subnet in its own region. DC01 is the hub and has bidirectional global VNet
+peering with each spoke: CA01, CA02, and SRV1. The spokes are not peered with
+one another. The existing Poland Central VNet in resource group `test` is
+included as a spoke.
 
-| Resource | Configuration |
-| --- | --- |
-| Resource group | Configurable name and Azure region |
-| Virtual network | One VNet with a private IPv4 address space |
-| Subnet | One subnet shared by all four VMs |
-| Windows VMs | Three regular, non-Spot VMs |
-| Windows image | Generalized Windows Gen2 managed image, described below |
-| Linux VM | Ubuntu Server 22.04 LTS Gen2; regular, non-Spot |
-| VM sizes | `Standard_D2s_v5` for Windows and Linux by default |
-| Network interfaces | One per VM, with a dynamic private IPv4 address |
-| Public IPs | One Standard SKU, static IPv4 address per VM |
-| Network security | One NSG associated with the shared subnet |
-| New OS disks | Standard SSD LRS; the managed image's original source disk uses Premium LRS |
+## VM and network settings
 
-All four VMs are in the same subnet. Each receives a public IP; inbound access
-is restricted by the subnet NSG.
+- All VMs use `Standard_D2s_v5` by default, Spot priority, and deallocate on
+  eviction. Spot capacity is not guaranteed; Azure can evict any VM, including
+  the domain controller and certificate authorities.
+- All VMs use the same Marketplace image reference:
+  `MicrosoftWindowsServer / WindowsServer / 2022-datacenter-g2 / latest`.
+- Each VM has a Standard static public IP and a Standard SSD LRS OS disk.
+- Each subnet NSG allows inbound RDP (TCP 3389) only from
+  `91.150.218.97/32` by default. No SSH or other inbound Internet access is
+  configured on the Windows VMs. Update `rdp_source_cidr` if your public
+  address changes.
+- The existing `test23` VM is in `vnet-polandcentral-1` (`172.16.0.0/16`),
+  resource group `test`. Terraform attaches a route table to its existing
+  subnet, `172.16.0.0/24`.
+- Global VNet peering can incur data-transfer charges.
 
-## Windows managed image
+## DC01 routing appliance
 
-The Windows VMs use a generalized Windows Gen2 Azure managed image. Its
-resource ID is configured in `main.tf` and is intentionally omitted from this
-README. Keep the source image available, and ensure the deploying identity can
-read and use it, for as long as Terraform may need to create or replace the
-Windows VMs. The image must also be available in a region compatible with the
-VM deployment.
+Terraform also creates a private-only Ubuntu 22.04 router VM (`dc01-router`)
+in Switzerland North, in a dedicated `10.30.2.0/24` subnet of `dc01-vnet`.
+It uses the one-vCPU `Standard_F1s` size, a static private address of
+`10.30.2.4`, and regular (non-Spot) priority to avoid Spot eviction taking
+down inter-VNet routing. Its NIC has Azure IP forwarding enabled. Cloud-init
+enables Linux IPv4 forwarding and loose reverse-path filtering at boot.
+Administration is through Azure Run Command; the VM has no public IP.
 
-Terraform's `source_image_id` uses the managed image directly. The VM
-configuration does not explicitly enable Trusted Launch for this image.
-Successful provisioning still depends on the source image having been
-correctly prepared and generalized for Azure VM deployment, including a
-working Azure VM Agent.
+Route tables are created and associated with the workload subnet in each of
+the five VNets. Each of the other VNet address prefixes is routed through
+`10.30.2.4`, including the routes for traffic originating in DC01's workload
+subnet. The router subnet itself has no UDR, so it can forward packets using
+Azure's routes to the peered VNets. Peering permits forwarded traffic.
 
-## Network access and security
+The existing NSGs are unchanged. In addition to the explicit RDP rule, the
+Windows NSGs retain Azure's default `AllowVnetInBound` rule, which allows
+traffic from the connected VNet address spaces; the route tables direct that
+inter-VNet traffic through the router. The Poland subnet currently has no NSG.
 
-The NSG is associated with the subnet and contains these inbound allow rules:
+CA01 is peered and has a public IP with an RDP rule, so it is not an offline
+or network-isolated Root CA. Before using CA01 as an offline Root CA, remove
+its public IP and VNet peering, and only bring it online for controlled
+administration and certificate transfers. The Windows VMs are Spot instances
+and may be evicted, so they are not suitable for reliable production
+certificate authorities.
 
-| Protocol | Port | Source |
-| --- | ---: | --- |
-| TCP | 22 (SSH) | Current public IPv4 address detected by Terraform, as a `/32` |
-| TCP | 3389 (RDP) | Current public IPv4 address detected by Terraform, as a `/32` |
+## Credentials and state
 
-The current public IPv4 address is fetched from `https://api4.ipify.org` by
-the Terraform HTTP provider during planning/applying. An internet connection
-is required. The detected address is the egress address visible to that
-service; VPNs, proxies, NAT gateways, or changing ISP addresses can affect
-which address you need. Check the `allowed_admin_public_ip` output before
-applying. If your public IP changes, run Terraform again to update the NSG.
+The same `admin_password` is set on all four VMs. Set a strong, unique
+Windows-compatible password through an ignored local `terraform.tfvars` file
+or `TF_VAR_admin_password`. Do not put it in source control. Terraform state
+contains sensitive values. The Azure Storage backend stores state at
+`tfblobcontainer/win-terraform/windows-ad-automation.tfstate` and authenticates
+using the signed-in Azure CLI identity. Grant that identity the **Storage Blob
+Data Contributor** role on the container (or a broader suitable scope). Enable
+storage-account blob versioning and soft delete to support state recovery.
+The router's Linux admin password is generated randomly and stored only in
+the remote Terraform state; use Azure Run Command rather than SSH to administer
+the private-only VM.
 
-The NSG is subnet-scoped: it allows both ports to all interfaces in the
-subnet, subject to the guest OS service listening on the port. Use a stable
-trusted source IP; do not replace the source with `*` or a broad range. For
-production access, consider private connectivity such as VPN or Azure Bastion
-instead of exposing VM public IPs.
-
-## Authentication and password handling
-
-The same Terraform variable, `admin_password`, is used for the Windows local
-administrator and Linux account password. It is marked `sensitive` in
-Terraform, which hides it in many CLI displays, but Terraform state can still
-contain the secret in plaintext. Protect state files and state backups, restrict
-access to them, and use a secured remote backend for shared or production
-deployments.
-
-Do not commit real passwords or `terraform.tfvars`. Use a strong, unique
-password that satisfies Windows and Linux password requirements. If the
-password previously used for this deployment was shared or reused, rotate it
-before deploying.
-
-Supply the password using either a local ignored `terraform.tfvars` file:
+Example local `terraform.tfvars`:
 
 ```hcl
 admin_password = "REPLACE_WITH_A_STRONG_UNIQUE_PASSWORD"
 ```
 
-or an environment variable. In a shell, set it without placing the secret in
-Terraform source code:
-
-```sh
-export TF_VAR_admin_password='REPLACE_WITH_A_STRONG_UNIQUE_PASSWORD'
-```
-
-Unset the environment variable when finished:
-
-```sh
-unset TF_VAR_admin_password
-```
-
-Other settings can be supplied in `terraform.tfvars`, for example:
-
-```hcl
-resource_group_name    = "your-resource-group"
-location               = "your-azure-region"
-windows_vm_size        = "Standard_D2s_v5"
-linux_vm_size          = "Standard_D2s_v5"
-windows_admin_username = "azureadmin"
-linux_admin_username   = "azureuser"
-```
-
-The repository currently does not include a `terraform.tfvars.example` file.
-Create a local `terraform.tfvars` if you want to override defaults, and ensure
-that it is excluded from source control.
-
-## Requirements
-
-- Terraform 1.5 or later
-- Azure CLI installed and signed in (`az login`), or another supported AzureRM
-  provider authentication method
-- Azure permissions to create resource groups, networking resources, public
-  IPs, and virtual machines in the selected subscription
-- Permission to use the Windows managed image in the `test` resource group
-- Internet access for the public-IP detection request
-
-Terraform uses the AzureRM provider (`>= 4.2.0, < 5.0.0`) and HTTP provider
-(`>= 3.4.0, < 4.0.0`). The lock file records the selected provider builds.
-
 ## Deploy
 
-From this directory, authenticate and choose the intended subscription:
+From this directory, authenticate to the intended subscription and initialize
+the remote backend. On first initialization Terraform migrates any local state
+to the configured blob:
 
-```sh
+```powershell
 az login
 az account set --subscription "<subscription-id>"
-az account show --output table
-```
-
-Set the sensitive password as described above, then initialize, validate, and
-review the plan:
-
-```sh
 terraform init
 terraform fmt -check
 terraform validate
 terraform plan
 ```
 
-Review the complete plan, especially the resource group, image ID, detected
-source IP, VM count, and estimated charges. Create resources only after
-reviewing the plan:
+Confirm the VM regions, Spot settings, image, RDP source CIDR, and estimated
+charges in the plan before applying. Use a newly rotated password; never reuse
+a password that has been shared in chat or stored in a previously exposed
+configuration:
 
-```sh
+```powershell
 terraform apply
 ```
 
-Terraform may ask for confirmation. Use `-auto-approve` only when you have
-already reviewed the plan and intentionally want to skip that confirmation.
-
-## Outputs
-
-After a successful apply, Terraform provides:
-
-- `resource_group_name`: resource group name
-- `virtual_network_id`: VNet resource ID
-- `windows_private_ip_addresses`: private IPs keyed by Windows VM name
-- `linux_private_ip_address`: Linux private IP
-- `windows_public_ip_addresses`: public IPs keyed by Windows VM name
-- `linux_public_ip_address`: Linux public IP
-- `allowed_admin_public_ip`: detected source address permitted by the NSG
-
-Use the Windows public IPs for RDP and the Linux public IP for SSH. The
-administrator usernames are `windows_admin_username` and
-`linux_admin_username`, respectively.
+Outputs include each VM's private and public IP, each VNet ID, and the
+permitted RDP source CIDR.
 
 ## Destroy
 
-To delete the Terraform-managed deployment, first inspect the destroy plan:
+Inspect the destroy plan before removing the deployment:
 
-```sh
+```powershell
 terraform plan -destroy
-```
-
-If it lists only resources you intend to remove, run:
-
-```sh
 terraform destroy
 ```
 
-This removes the Terraform-managed resource group and its resources. It does
-not delete the source managed image in resource group `test`. Detached disks,
-manually created objects, or other untracked resources may not be removed by a
-Terraform destroy; inspect the target resource group in Azure after
-destruction.
-
-## Cost and operational notes
-
-These are regular, non-Spot VMs, so compute is billed while the VMs are
-allocated, including when stopped from inside the guest OS. Deallocating a VM
-stops compute billing, but managed disks and some networking resources can
-continue to incur charges. Standard static public IPs and OS disks can also
-incur charges. Check Azure pricing and your subscription's quotas before
-deployment.
-
-This configuration does not create backups, monitoring, a remote Terraform
-state backend, or high availability. Treat the VMs as interruptible only if
-you separately change their priority to Spot; the current configuration
-creates regular VMs.
+This removes the Terraform-managed resource group and its resources, as well
+as the route-table association Terraform manages on the existing Poland
+subnet. The Poland VNet and VM are not Terraform-managed and are not deleted.

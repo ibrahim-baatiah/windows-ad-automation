@@ -1,23 +1,17 @@
 variable "resource_group_name" {
-  description = "Name of the new resource group."
+  description = "Name of the shared resource group for the Windows VM deployment."
   type        = string
   default     = "rg-spot-vms"
 }
 
 variable "location" {
-  description = "Azure region for the resource group and virtual machines."
+  description = "Azure region for the shared resource group."
   type        = string
   default     = "polandcentral"
 }
 
 variable "windows_vm_size" {
-  description = "Azure VM size for all three Windows Spot VMs."
-  type        = string
-  default     = "Standard_D2s_v5"
-}
-
-variable "linux_vm_size" {
-  description = "Azure VM size for the Linux Spot VM."
+  description = "Azure VM size shared by all four Windows Spot VMs."
   type        = string
   default     = "Standard_D2s_v5"
 }
@@ -39,10 +33,15 @@ variable "admin_password" {
   }
 }
 
-variable "linux_admin_username" {
-  description = "SSH administrator username for the Linux VM."
+variable "rdp_source_cidr" {
+  description = "Single public IPv4 CIDR allowed to access the VMs over RDP."
   type        = string
-  default     = "azureuser"
+  default     = "91.150.218.97/32"
+
+  validation {
+    condition     = can(cidrnetmask(var.rdp_source_cidr)) && can(regex("/32$", var.rdp_source_cidr))
+    error_message = "rdp_source_cidr must be a single IPv4 address with a /32 mask."
+  }
 }
 
 variable "tags" {
