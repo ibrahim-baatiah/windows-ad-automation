@@ -5,12 +5,12 @@ $creds = @{
 $psCred = New-Object PSCredential($creds.name, $creds.Password)
 $session = New-PSSession -ComputerName '10.10.1.4' -Credential $psCred
 
-Invoke-Command -Session $session -ScriptBlock  {
+$DCList=Invoke-Command -Session $session -ScriptBlock  {
     try {
         Import-Module ActiveDirectory -ErrorAction Stop
     }
     catch {
-        Write-Debug $_.Exception.Message
+        Write-Error $_.Exception.Message
     }
     
     $PDC=(Get-ADDomain).PDCEmulator
@@ -40,7 +40,7 @@ Invoke-Command -Session $session -ScriptBlock  {
         }
         catch {
             $state = "Unreachable"
-            Write-Output $_.Exception.Message
+            Write-Warning $_.Exception.Message
         }
         $DC |  Add-Member -MemberType NoteProperty -Name DfsrState -Value $state -Force
     }
@@ -58,11 +58,13 @@ Invoke-Command -Session $session -ScriptBlock  {
         }
         $DC | Add-Member -MemberType NoteProperty -Name StateText -Value $text -Force
     }
-    $unhealthy = $DCList | Where-Object {$_.DfsrState -ne 4}
-    if (-not $unhealthy) {
-        Write-Output "SYSVOL healthy, nothing to do"
-        return
-    }
-    Write-Output "Unhealthy DCs:"
-    $unhealthy | Format-Table Name, IPv4Address, IsPDC, DfsrState, StateText -AutoSize
+    $DCList
 }
+
+$unhealthy = $DCList | Where-Object {$_.DfsrState -ne 4}
+if (-not $unhealthy) {
+    Write-Output "SYSVOL healthy, nothing to do"
+    return $DCList
+}
+Write-Output "Unhealthy DCs:"
+$unhealthy | Format-Table Name, IPv4Address, IsPDC, DfsrState, StateText -AutoSize
