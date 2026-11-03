@@ -1,0 +1,29 @@
+---
+# Requires: ansible-galaxy collection install ansible.windows microsoft.ad
+- name: Join Windows clients to the domain
+  hosts: clients
+  gather_facts: false
+  tasks:
+    - name: Point DNS to the domain controllers
+      ansible.windows.win_dns_client:
+        adapter_names: "*"
+        dns_servers: "{{ dc_dns_servers }}"
+
+    - name: Join the domain
+      microsoft.ad.membership:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "{{ domain_netbios }}\\{{ ansible_user }}"
+        domain_admin_password: "{{ ansible_password }}"
+        state: domain
+        reboot: false
+      register: join
+
+    # The 1 vCPU client reboots slowly, so allow longer than the module's default.
+    - name: Reboot to complete the join
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+      when: join.reboot_required
+
+    - name: Verify the secure channel to the domain
+      ansible.windows.win_command: nltest /sc_verify:{{ domain_name }}
+      changed_when: false
